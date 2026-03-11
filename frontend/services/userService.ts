@@ -17,19 +17,25 @@ const dbRowToUser = (row: any): User => ({
 });
 
 // Convert User to database row format
-const userToDbRow = (user: User) => ({
-  user_id: user.id,
-  name: user.name,
-  email: user.email,
-  role: user.role,
-  plan: user.plan,
-  daily_limit: user.dailyLimit,
-  records_extracted_today: user.recordsExtractedToday,
-  last_active: user.lastActive,
-  ip_address: user.ipAddress,
-  is_online: user.isOnline,
-  is_blocked: user.isBlocked || false
-});
+const userToDbRow = (user: User) => {
+  const row: Record<string, unknown> = {
+    user_id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    plan: user.plan,
+    daily_limit: user.dailyLimit,
+    records_extracted_today: user.recordsExtractedToday,
+    last_active: user.lastActive,
+    ip_address: user.ipAddress,
+    is_online: user.isOnline,
+    is_blocked: user.isBlocked || false
+  };
+  if (user.password) {
+    row.password = user.password;
+  }
+  return row;
+};
 
 // Fetch all users from Supabase
 export const fetchUsersFromSupabase = async (): Promise<User[]> => {
