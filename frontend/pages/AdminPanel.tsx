@@ -27,6 +27,7 @@ export const AdminPanel: React.FC = () => {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPlan, setNewUserPlan] = useState<'Free' | 'Starter' | 'Pro' | 'Enterprise'>('Free');
   const [newUserRole, setNewUserRole] = useState<'user' | 'admin'>('user');
+  const [newUserPassword, setNewUserPassword] = useState('');
   
   // Block IP form state
   const [blockIpAddress, setBlockIpAddress] = useState('');
@@ -143,8 +144,8 @@ export const AdminPanel: React.FC = () => {
   };
 
   const handleAddUser = async () => {
-    if (!newUserName.trim() || !newUserEmail.trim()) {
-      showMessage('error', 'Name and email are required');
+    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) {
+      showMessage('error', 'Name, email and password are required');
       return;
     }
     
@@ -162,6 +163,7 @@ export const AdminPanel: React.FC = () => {
       id: `user-${Date.now()}`,
       name: newUserName.trim(),
       email: newUserEmail.trim().toLowerCase(),
+      password: newUserPassword,
       role: newUserRole,
       plan: newUserPlan,
       dailyLimit: newUserPlan === 'Free' ? 50 : newUserPlan === 'Starter' ? 100 : newUserPlan === 'Pro' ? 500 : 100000,
@@ -179,6 +181,7 @@ export const AdminPanel: React.FC = () => {
       // Reset form
       setNewUserName('');
       setNewUserEmail('');
+      setNewUserPassword('');
       setNewUserPlan('Free');
       setNewUserRole('user');
       setActiveTab('users');
@@ -584,6 +587,16 @@ export const AdminPanel: React.FC = () => {
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:border-indigo-500"
               />
             </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Password *</label>
+              <input
+                type="password"
+                placeholder="Enter password"
+                value={newUserPassword}
+                onChange={(e) => setNewUserPassword(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:border-indigo-500"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Plan</label>
@@ -613,7 +626,7 @@ export const AdminPanel: React.FC = () => {
             <div className="pt-4">
               <button
                 onClick={handleAddUser}
-                disabled={isSaving || !newUserName.trim() || !newUserEmail.trim()}
+                disabled={isSaving || !newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()}
                 className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50"
               >
                 {isSaving ? 'Creating...' : 'Create User Account'}
