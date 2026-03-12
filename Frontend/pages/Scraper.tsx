@@ -1,12 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Play, Download, Pause, Activity, Terminal as TerminalIcon, AlertCircle, CheckCircle2, ShieldCheck, Zap, Lock, Database } from 'lucide-react';
 import { CarrierData, ScraperConfig, User } from '../types';
-import { generateMockCarrier, scrapeRealCarrier, downloadCSV } from '../services/mockService';
-import { saveCarrierToSupabase } from '../services/supabaseClient';
+import { downloadCSV } from '../services/mockService';
+import {
+  startScraperTask,
+  stopScraperTask,
+  getScraperStatus,
+  TaskStatus,
+} from '../services/backendService';
 
-const CONCURRENCY_LIMIT = 1;
-const BATCH_SAVE_THRESHOLD = 1000; // Save to Supabase every N records
-const SYNC_PAUSE_SECONDS = 60;     // Pause duration in seconds before syncing
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 interface ScraperProps {
   user: User;
@@ -35,9 +38,9 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
   const [selectedCarrier, setSelectedCarrier] = useState<CarrierData | null>(null);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
-  const isRunningRef = useRef(false);
-  // Pending batch — records collected since last sync
-  const pendingBatchRef = useRef<CarrierData[]>([]);
+  const taskIdRef = useRef<string | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevLogCountRef = useRef(0);
 
   const scrollToBottom = () => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -47,183 +50,145 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
     scrollToBottom();
   }, [logs]);
 
-  // ─── Supabase batch sync helper ───────────────────────────────────────────
-  const syncBatchToSupabase = async (batch: CarrierData[]): Promise<number> => {
-    let saved = 0;
-    for (const carrier of batch) {
-      const result = await saveCarrierToSupabase(carrier);
-      if (result.success) saved++;
-    }
-    return saved;
-  };
+  // Check for active backend task on mount (reconnect if page was refreshed)
+  useEffect(() => {
+    const checkActiveTask = async () => {
+      try {
+        const resp = await fetch(`${BACKEND_URL}/api/tasks/active?task_type=scraper`);
+        const data = await resp.json();
+        if (data.task_id && data.task?.status === 'running') {
+          taskIdRef.current = data.task_id;
+          setIsRunning(true);
+          setLogs(prev => [...prev, `Reconnected to running task ${data.task_id}...`]);
+          startPolling(data.task_id);
+        }
+      } catch (_e) {
+        // Backend not available
+      }
+    };
+    checkActiveTask();
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
+  }, []);
 
-  // ─── 1-minute countdown + sync ────────────────────────────────────────────
-  const pauseAndSync = async (): Promise<void> => {
-    const batch = [...pendingBatchRef.current];
-    pendingBatchRef.current = [];
+  // ─── Poll backend task status ──────────────────────────────────────────────
+  const startPolling = (taskId: string) => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
 
-    setIsSyncing(true);
-    setLogs(prev => [...prev, `⏸️ Batch threshold hit (${batch.length} records). Pausing ${SYNC_PAUSE_SECONDS}s to sync...`]);
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const status: TaskStatus = await getScraperStatus(taskId);
 
-    // Countdown
-    for (let i = SYNC_PAUSE_SECONDS; i > 0; i--) {
-      if (!isRunningRef.current) break; // user stopped
-      setSyncCountdown(i);
-      await new Promise(r => setTimeout(r, 1000));
-    }
-    setSyncCountdown(0);
+        // Update logs (only add new ones)
+        if (status.logs && status.logs.length > prevLogCountRef.current) {
+          const newLogs = status.logs.slice(prevLogCountRef.current);
+          setLogs(prev => [...prev, ...newLogs]);
+          prevLogCountRef.current = status.logs.length;
+        }
 
-    // Sync
-    setLogs(prev => [...prev, `💾 Syncing ${batch.length} records to Supabase...`]);
-    const saved = await syncBatchToSupabase(batch);
-    setTotalDbSaved(prev => prev + saved);
-    setLogs(prev => [...prev, `✅ Sync complete — ${saved}/${batch.length} records saved. Resuming...`]);
+        // Update progress
+        setProgress(status.progress || 0);
+        setTotalDbSaved(status.dbSaved || 0);
+        setIsSyncing(status.status === 'running' && (status.dbSaved || 0) > 0);
 
-    setIsSyncing(false);
+        // Update scraped data from recent items
+        const recentData = (status as any).recentData;
+        if (recentData && recentData.length > 0) {
+          setScrapedData(recentData as CarrierData[]);
+          onUpdateUsage(status.extracted || status.completed || 0);
+        }
+
+        // Task finished
+        if (status.status === 'completed' || status.status === 'stopped') {
+          setIsRunning(false);
+          setIsSyncing(false);
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
+          // Fetch full data for CSV export
+          try {
+            const fullResp = await fetch(`${BACKEND_URL}/api/tasks/scraper/data?task_id=${taskId}`);
+            const fullData = await fullResp.json();
+            if (Array.isArray(fullData)) {
+              setScrapedData(fullData as CarrierData[]);
+            }
+          } catch (_e) {
+            // Keep recent data
+          }
+        }
+      } catch (_e) {
+        // Network error, keep polling
+      }
+    }, 2000);
   };
 
   // ─── Toggle run ───────────────────────────────────────────────────────────
-  const toggleRun = () => {
+  const toggleRun = async () => {
     if (isRunning) {
+      // Stop the backend task
+      if (taskIdRef.current) {
+        try {
+          await stopScraperTask(taskIdRef.current);
+          setLogs(prev => [...prev, 'Stop signal sent to server. Finishing current operation...']);
+        } catch (_e) {
+          setLogs(prev => [...prev, 'Error: Could not stop task on server']);
+        }
+      }
       setIsRunning(false);
-      isRunningRef.current = false;
-      setLogs(prev => [...prev, '⚠️ Process paused by user.']);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
     } else {
       if (user.recordsExtractedToday >= user.dailyLimit) {
         setShowUpgradeModal(true);
         return;
       }
       setIsRunning(true);
-      isRunningRef.current = true;
-      pendingBatchRef.current = [];
-      setTotalDbSaved(0);
-      setLogs(prev => [...prev, `🚀 Initializing High-Speed Scraper...`]);
-      setLogs(prev => [...prev, `Mode: ${config.useMockData ? 'Simulation' : config.useProxy ? 'Proxy Network' : 'Direct (VPN)'}`]);
-      setLogs(prev => [...prev, `Targeting ${config.recordCount} records starting at MC# ${config.startPoint}`]);
-      setLogs(prev => [...prev, `💾 Auto-sync every ${BATCH_SAVE_THRESHOLD} records (${SYNC_PAUSE_SECONDS}s pause)`]);
+      prevLogCountRef.current = 0;
+      setLogs([
+        `Initializing Persistent Backend Scraper...`,
+        `Mode: Server-Side (tasks persist even if you close this page)`,
+        `Targeting ${config.recordCount} records starting at MC# ${config.startPoint}`,
+      ]);
       setScrapedData([]);
       setProgress(0);
-      processScrapingConcurrent();
-    }
-  };
+      setTotalDbSaved(0);
 
-  // ─── Main concurrent scraper ──────────────────────────────────────────────
-  const processScrapingConcurrent = async () => {
-    const start = parseInt(config.startPoint);
-    const total = config.recordCount;
-    let completed = 0;
-    let sessionExtracted = 0;
-    const initialUsed = user.recordsExtractedToday;
-    const limit = user.dailyLimit;
-
-    const tasks = Array.from({ length: total }, (_, i) => (start + i).toString());
-
-    const worker = async (mc: string) => {
-      if (!isRunningRef.current) return;
-
-      if (initialUsed + sessionExtracted >= limit) {
-        isRunningRef.current = false;
-        setIsRunning(false);
-        setLogs(prev => [...prev, '⛔ DAILY LIMIT REACHED: Upgrade to extract more.']);
-        setShowUpgradeModal(true);
-        return;
-      }
-
-      let newData: CarrierData | null = null;
       try {
-        if (config.useMockData) {
-          await new Promise(r => setTimeout(r, 100));
-          const isBroker = config.includeBrokers && (!config.includeCarriers || Math.random() > 0.5);
-          newData = generateMockCarrier(mc, isBroker);
-        } else {
-          newData = await scrapeRealCarrier(mc, config.useProxy);
-        }
+        const result = await startScraperTask({
+          startPoint: config.startPoint,
+          recordCount: config.recordCount,
+          includeCarriers: config.includeCarriers,
+          includeBrokers: config.includeBrokers,
+          onlyAuthorized: config.onlyAuthorized,
+        });
+        taskIdRef.current = result.task_id;
+        setLogs(prev => [...prev, `Task ${result.task_id} started on server. Scraping in background...`]);
+        startPolling(result.task_id);
       } catch (e) {
-        // silent
-      }
-
-      if (newData) {
-        let matchesFilter = true;
-        const type = newData.entityType.toUpperCase();
-        const isCarrier = type.includes('CARRIER');
-        const isBroker = type.includes('BROKER');
-        const status = newData.status.toUpperCase();
-
-        if (!config.includeCarriers && isCarrier && !isBroker) matchesFilter = false;
-        if (!config.includeBrokers && isBroker && !isCarrier) matchesFilter = false;
-
-        if (config.onlyAuthorized) {
-          if (status.includes('NOT AUTHORIZED') || !status.includes('AUTHORIZED')) {
-            matchesFilter = false;
-          }
-        }
-
-        if (matchesFilter) {
-          setScrapedData(prev => [...prev, newData!]);
-          setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName}`]);
-
-          // Add to pending batch
-          pendingBatchRef.current.push(newData);
-
-          sessionExtracted++;
-          onUpdateUsage(1);
-
-          // ── Hit threshold → pause & sync ──
-          if (pendingBatchRef.current.length >= BATCH_SAVE_THRESHOLD) {
-            // Temporarily stop dispatching new workers by pausing the outer loop.
-            // We achieve this by awaiting pauseAndSync() directly here.
-            // Since worker is called inside Promise.race, this naturally
-            // blocks that slot until sync is done.
-            await pauseAndSync();
-          }
-        }
-      } else {
-        setLogs(prev => [...prev, `[Fail] MC ${mc} - No Data`]);
-      }
-
-      completed++;
-      setProgress(Math.round((completed / total) * 100));
-    };
-
-    // Concurrency pool
-    const activePromises: Promise<void>[] = [];
-
-    for (const mc of tasks) {
-      if (!isRunningRef.current) break;
-
-      const p = worker(mc).then(() => {
-        activePromises.splice(activePromises.indexOf(p), 1);
-      });
-      activePromises.push(p);
-
-      if (activePromises.length >= CONCURRENCY_LIMIT) {
-        await Promise.race(activePromises);
+        setLogs(prev => [...prev, `[Error] Could not start backend task: ${e}`]);
+        setIsRunning(false);
       }
     }
-
-    await Promise.all(activePromises);
-
-    // ── Final sync for any remaining records ──────────────────────────────
-    if (pendingBatchRef.current.length > 0) {
-      const remaining = [...pendingBatchRef.current];
-      pendingBatchRef.current = [];
-      setLogs(prev => [...prev, `💾 Final sync: saving ${remaining.length} remaining records...`]);
-      const saved = await syncBatchToSupabase(remaining);
-      setTotalDbSaved(prev => {
-        const next = prev + saved;
-        setLogs(l => [...l, `✅ Final sync complete — ${saved} records saved. Total DB: ${next}`]);
-        return next;
-      });
-    }
-
-    setIsRunning(false);
-    isRunningRef.current = false;
-    setIsSyncing(false);
-    setSyncCountdown(0);
-    setLogs(prev => [...prev, '✅ Batch Job Complete.']);
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
+    if (taskIdRef.current && scrapedData.length <= 20) {
+      // Fetch full data if we only have recent preview
+      try {
+        const resp = await fetch(`${BACKEND_URL}/api/tasks/scraper/data?task_id=${taskIdRef.current}`);
+        const fullData = await resp.json();
+        if (Array.isArray(fullData) && fullData.length > 0) {
+          downloadCSV(fullData as CarrierData[]);
+          return;
+        }
+      } catch (_e) {
+        // Fall through to local data
+      }
+    }
     if (scrapedData.length === 0) return;
     downloadCSV(scrapedData);
   };
@@ -650,7 +615,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
                           </span>
                         </td>
                         <td className="p-3">
-                          {row.status.includes('AUTHORIZED') && !row.status.includes('NOT AUTHORIZED') ? (
+                          {row.status?.includes('AUTHORIZED') && !row.status?.includes('NOT AUTHORIZED') ? (
                             <div className="flex items-center gap-1 text-green-400">
                               <CheckCircle2 size={14} />
                               <span className="text-[10px]">Auth</span>
