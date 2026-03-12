@@ -59,7 +59,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
           taskIdRef.current = data.task_id;
           setIsProcessing(true);
           isRunningRef.current = true;
-          setLogs(prev => [...prev, `\uD83D\uDD04 Reconnected to running insurance task ${data.task_id}...`]);
+          setLogs(prev => [...prev, `🔄 Reconnected to running insurance task ${data.task_id}...`]);
           startPolling(data.task_id);
         }
       } catch (_e) {
@@ -112,7 +112,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
   const startEnrichmentProcess = async (targetList: CarrierData[] = carriers) => {
     if (isProcessing) return;
     if (targetList.length === 0) {
-      setLogs(prev => [...prev, "\u274C Error: No carriers found in range/database."]);
+      setLogs(prev => [...prev, "❌ Error: No carriers found in range/database."]);
       return;
     }
 
@@ -123,18 +123,18 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
     
     const dotNumbers = targetList.map(c => c.dotNumber).filter(Boolean);
     setLogs([
-      `\uD83D\uDE80 ENGINE INITIALIZED: Insurance Enrichment...`,
-      `\uD83D\uDD0D Targeting: ${dotNumbers.length} USDOT records`,
-      `\uD83D\uDD12 Tasks persist even if you close this page.`,
+      `🚀 ENGINE INITIALIZED: Insurance Enrichment...`,
+      `🔍 Targeting: ${dotNumbers.length} USDOT records`,
+      `🔒 Tasks persist even if you close this page.`,
     ]);
 
     try {
       const result = await startInsuranceTask({ dotNumbers });
       taskIdRef.current = result.task_id;
-      setLogs(prev => [...prev, `\u2705 Task ${result.task_id} started on server.`]);
+      setLogs(prev => [...prev, `✅ Task ${result.task_id} started on server.`]);
       startPolling(result.task_id);
     } catch (e) {
-      setLogs(prev => [...prev, `\u274C [Error] Could not start backend task: ${e}`]);
+      setLogs(prev => [...prev, `❌ [Error] Could not start backend task: ${e}`]);
       setIsProcessing(false);
       isRunningRef.current = false;
     }
@@ -144,7 +144,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
     if (taskIdRef.current) {
       try {
         await stopInsuranceTask(taskIdRef.current);
-        setLogs(prev => [...prev, '\u26D4 Stop signal sent to server...']);
+        setLogs(prev => [...prev, '⛔ Stop signal sent to server...']);
       } catch (_e) {
         // ignore
       }
@@ -167,7 +167,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
       return mc >= start && mc <= end;
     });
 
-    setLogs(prev => [...prev, `\uD83C\uDFAF Range identified: MC ${start} to ${end} (${filtered.length} found)`]);
+    setLogs(prev => [...prev, `🎯 Range identified: MC ${start} to ${end} (${filtered.length} found)`]);
     startEnrichmentProcess(filtered);
   };
 
