@@ -263,9 +263,9 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
           <div className="flex-1 overflow-y-auto p-10 font-mono text-[11px] space-y-3 custom-scrollbar">
             {logs.map((log, i) => (
               <div key={i} className={`flex gap-4 items-start p-3 rounded-xl transition-all ${
-                log.includes('✨') || log.includes('✅') || log.includes('🎉') 
+                log.includes('✨') || log.includes('✅') || log.includes('🎉') || log.includes('Success:') || log.includes('DB Sync:') || log.includes('ENRICHMENT COMPLETE')
                 ? 'text-emerald-400 bg-emerald-500/5 border border-emerald-500/10' 
-                : log.includes('❌') ? 'text-red-400 bg-red-500/5 border border-red-500/10' 
+                : log.includes('❌') || log.includes('Fail:') || log.includes('[Error]') ? 'text-red-400 bg-red-500/5 border border-red-500/10' 
                 : 'text-slate-400'
               }`}>
                 <span className="text-slate-600 shrink-0 select-none">[{new Date().toLocaleTimeString().split(' ')[0]}]</span>
