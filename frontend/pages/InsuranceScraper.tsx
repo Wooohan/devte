@@ -3,14 +3,6 @@ import { ShieldCheck, Play, Download, Database, SearchIcon, ClipboardList, Loade
 import { CarrierData, InsurancePolicy } from '../types';
 import { fetchInsuranceData } from '../services/mockService';
 import { updateCarrierInsurance } from '../services/supabaseClient';
-import {
-  startInsuranceTask,
-  stopInsuranceTask,
-  getInsuranceStatus,
-  TaskStatus,
-} from '../services/backendService';
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 interface InsuranceScraperProps {
   carriers: CarrierData[];
@@ -34,9 +26,6 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
   const logsEndRef = useRef<HTMLDivElement>(null);
   const isRunningRef = useRef(false);
   const hasAutoStarted = useRef(false);
-  const taskIdRef = useRef<string | null>(null);
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const prevLogCountRef = useRef(0);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -49,66 +38,6 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
     }
   }, [autoStart, carriers]);
 
-  // Reconnect to active insurance task on mount
-  useEffect(() => {
-    const checkActiveTask = async () => {
-      try {
-        const resp = await fetch(`${BACKEND_URL}/api/tasks/active?task_type=insurance`);
-        const data = await resp.json();
-        if (data.task_id && data.task?.status === 'running') {
-          taskIdRef.current = data.task_id;
-          setIsProcessing(true);
-          isRunningRef.current = true;
-          setLogs(prev => [...prev, `🔄 Reconnected to running insurance task ${data.task_id}...`]);
-          startPolling(data.task_id);
-        }
-      } catch (_e) {
-        // Backend not available
-      }
-    };
-    checkActiveTask();
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    };
-  }, []);
-
-  const startPolling = (taskId: string) => {
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-
-    pollIntervalRef.current = setInterval(async () => {
-      try {
-        const status: TaskStatus = await getInsuranceStatus(taskId);
-
-        // Update logs
-        if (status.logs && status.logs.length > prevLogCountRef.current) {
-          const newLogs = status.logs.slice(prevLogCountRef.current);
-          setLogs(prev => [...prev, ...newLogs]);
-          prevLogCountRef.current = status.logs.length;
-        }
-
-        // Update progress & stats
-        setProgress(status.progress || 0);
-        setStats(prev => ({
-          ...prev,
-          insFound: status.insFound || 0,
-          dbSaved: status.dbSaved || 0,
-        }));
-
-        // Task finished
-        if (status.status === 'completed' || status.status === 'stopped') {
-          setIsProcessing(false);
-          isRunningRef.current = false;
-          if (pollIntervalRef.current) {
-            clearInterval(pollIntervalRef.current);
-            pollIntervalRef.current = null;
-          }
-        }
-      } catch (_e) {
-        // Network error, keep polling
-      }
-    }, 2000);
-  };
-
   const startEnrichmentProcess = async (targetList: CarrierData[] = carriers) => {
     if (isProcessing) return;
     if (targetList.length === 0) {
@@ -118,43 +47,73 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
 
     setIsProcessing(true);
     isRunningRef.current = true;
-    prevLogCountRef.current = 0;
     setStats({ total: targetList.length, insFound: 0, insFailed: 0, dbSaved: 0 });
     
-    const dotNumbers = targetList.map(c => c.dotNumber).filter(Boolean);
-    setLogs([
-      `🚀 ENGINE INITIALIZED: Insurance Enrichment...`,
-      `🔍 Targeting: ${dotNumbers.length} USDOT records`,
-      `🔒 Tasks persist even if you close this page.`,
-    ]);
+    setLogs(prev => [...prev, `🚀 ENGINE INITIALIZED: Insurance Enrichment...`]);
+    setLogs(prev => [...prev, `🔍 Targeting: ${targetList.length} USDOT records`]);
+    
+    const updatedCarriers = [...carriers]; 
+    let currentInsFound = 0;
+    let currentInsFailed = 0;
+    let currentDbSaved = 0;
 
-    try {
-      const result = await startInsuranceTask({ dotNumbers });
-      taskIdRef.current = result.task_id;
-      setLogs(prev => [...prev, `✅ Task ${result.task_id} started on server.`]);
-      startPolling(result.task_id);
-    } catch (e) {
-      setLogs(prev => [...prev, `❌ [Error] Could not start backend task: ${e}`]);
-      setIsProcessing(false);
-      isRunningRef.current = false;
-    }
-  };
+    for (let i = 0; i < targetList.length; i++) {
+      if (!isRunningRef.current) break;
 
-  const handleStop = async () => {
-    if (taskIdRef.current) {
+      const dot = targetList[i].dotNumber;
+      setLogs(prev => [...prev, `⏳ [INSURANCE] [${i+1}/${targetList.length}] Querying DOT: ${dot}...`]);
+      
       try {
-        await stopInsuranceTask(taskIdRef.current);
-        setLogs(prev => [...prev, '⛔ Stop signal sent to server...']);
-      } catch (_e) {
-        // ignore
+        // 1. EXTRACTION — calls backend /api/insurance/{dot} one-by-one
+        const { policies } = await fetchInsuranceData(dot);
+        
+        const indexInFullList = updatedCarriers.findIndex(c => c.dotNumber === dot);
+        if (indexInFullList !== -1) {
+          updatedCarriers[indexInFullList] = { ...updatedCarriers[indexInFullList], insurancePolicies: policies };
+        }
+
+        if (policies.length > 0) {
+          currentInsFound++;
+          setLogs(prev => [...prev, `✨ Success: Extracted ${policies.length} insurance filings for ${dot}`]);
+          
+          // 2. IMMEDIATE SYNC (Only if data found)
+          try {
+            const res = await updateCarrierInsurance(dot, { policies });
+            if (res) {
+              currentDbSaved++;
+              setLogs(prev => [...prev, `✅ DB Sync: Record ${dot} updated successfully`]);
+            }
+          } catch (syncErr) {
+            setLogs(prev => [...prev, `❌ DB Fail: Could not sync ${dot}`]);
+          }
+        } else {
+          setLogs(prev => [...prev, `⚠️ Info: No active insurance found for ${dot}`]);
+        }
+      } catch (err) {
+        currentInsFailed++;
+        setLogs(prev => [...prev, `❌ Fail: Insurance timeout for DOT ${dot}`]);
       }
+
+      // Update UI Counters immediately after each carrier
+      setProgress(Math.round(((i + 1) / targetList.length) * 100));
+      setStats(prev => ({ 
+        ...prev, 
+        insFound: currentInsFound, 
+        insFailed: currentInsFailed, 
+        dbSaved: currentDbSaved 
+      }));
+      
+      if ((i + 1) % 3 === 0 || (i + 1) === targetList.length) {
+          onUpdateCarriers([...updatedCarriers]);
+      }
+
+      // Throttle for API stability (~3 requests/sec)
+      await new Promise(r => setTimeout(r, 1000));
     }
-    isRunningRef.current = false;
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
+
     setIsProcessing(false);
+    isRunningRef.current = false;
+    setLogs(prev => [...prev, `🎉 ENRICHMENT COMPLETE. Database fully synchronized.`]);
   };
 
   const handleRangeRun = () => {
@@ -194,7 +153,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
         </div>
         <div className="flex gap-4">
           <button 
-            onClick={() => isProcessing ? handleStop() : startEnrichmentProcess()}
+            onClick={() => isProcessing ? (isRunningRef.current = false) : startEnrichmentProcess()}
             className={`group flex items-center gap-3 px-10 py-4 rounded-2xl font-black transition-all ${
                 isProcessing ? 'bg-red-500/10 text-red-500 border border-red-500/50' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25'
             }`}
@@ -261,21 +220,17 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
             Insurance Pipeline Stream
           </div>
           <div className="flex-1 overflow-y-auto p-10 font-mono text-[11px] space-y-3 custom-scrollbar">
-            {logs.map((log, i) => {
-              const isSuccess = log.includes('\u2728') || log.includes('\u2705') || log.includes('\uD83C\uDF89') || log.includes('Success:') || log.includes('DB Sync:') || log.includes('ENRICHMENT COMPLETE');
-              const isError = log.includes('\u274c') || log.includes('Fail:') || log.includes('Error');
-              return (
+            {logs.map((log, i) => (
               <div key={i} className={`flex gap-4 items-start p-3 rounded-xl transition-all ${
-                isSuccess
+                log.includes('\u2728') || log.includes('\u2705') || log.includes('\uD83C\uDF89') 
                 ? 'text-emerald-400 bg-emerald-500/5 border border-emerald-500/10' 
-                : isError ? 'text-red-400 bg-red-500/5 border border-red-500/10' 
+                : log.includes('\u274C') ? 'text-red-400 bg-red-500/5 border border-red-500/10' 
                 : 'text-slate-400'
               }`}>
                 <span className="text-slate-600 shrink-0 select-none">[{new Date().toLocaleTimeString().split(' ')[0]}]</span>
                 <span className="leading-relaxed">{log}</span>
               </div>
-              );
-            })}
+            ))}
             <div ref={logsEndRef} />
           </div>
         </div>

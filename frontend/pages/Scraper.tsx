@@ -14,10 +14,12 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 interface ScraperProps {
   user: User;
   onUpdateUsage: (count: number) => void;
+  onNewCarriers?: (carriers: CarrierData[]) => void;
   onUpgrade: () => void;
+  onFinish?: () => void;
 }
 
-export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade }) => {
+export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarriers, onUpgrade, onFinish }) => {
   const [isRunning, setIsRunning] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncCountdown, setSyncCountdown] = useState(0);
@@ -97,6 +99,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
         if (recentData && recentData.length > 0) {
           setScrapedData(recentData as CarrierData[]);
           onUpdateUsage(status.extracted || status.completed || 0);
+          onNewCarriers?.(recentData as CarrierData[]);
         }
 
         // Task finished
@@ -113,10 +116,12 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
             const fullData = await fullResp.json();
             if (Array.isArray(fullData)) {
               setScrapedData(fullData as CarrierData[]);
+              onNewCarriers?.(fullData as CarrierData[]);
             }
           } catch (_e) {
             // Keep recent data
           }
+          onFinish?.();
         }
       } catch (_e) {
         // Network error, keep polling
