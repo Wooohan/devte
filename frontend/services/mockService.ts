@@ -380,28 +380,51 @@ export const scrapeRealCarrier = async (
 
   const cleanEmail = email.replace(/Â|\[|\]/g, '').trim();
 
+  // Parse mileage and year from combined field like "120,000 (2023)"
+  const rawMileage = getVal('MCS-150 Mileage (Year):');
+  const mileageMatch = rawMileage.match(/([\d,]+)/);
+  const yearMatch = rawMileage.match(/\((\d{4})\)/);
+  const mcs150Mileage = mileageMatch ? mileageMatch[1].replace(/,/g, '') : '';
+  const mcs150MileageYear = yearMatch ? yearMatch[1] : '';
+
+  // Parse physical address for state/city
+  const physAddr = getVal('Physical Address:');
+  const addrParts = physAddr.split(',').map(s => s.trim());
+  const phyCity = addrParts.length >= 2 ? addrParts[addrParts.length - 2] : '';
+  const stateZip = addrParts.length >= 1 ? addrParts[addrParts.length - 1] : '';
+  const phyState = stateZip.split(/\s+/)[0] || '';
+
+  // Determine status code from status text
+  const statusCode = status.toUpperCase().includes('AUTHORIZED') ? 'A' : 'N';
+
   return {
     mcNumber,
     dotNumber,
     legalName:   getVal('Legal Name:'),
     dbaName:     getVal('DBA Name:'),
-    entityType:  getVal('Entity Type:'),
     status,
+    statusCode,
     email: cleanEmail.toLowerCase().includes('email protected') ? '' : cleanEmail,
     phone:       getVal('Phone:'),
     powerUnits:  getVal('Power Units:'),
-    drivers:     getVal('Drivers:'),                      // ✅ now gets full value
-    physicalAddress: getVal('Physical Address:'),         // ✅ now gets city/state/zip after <br>
+    drivers:     getVal('Drivers:'),
+    totalCdl:    '',
+    truckUnits:  '',
+    physicalAddress: physAddr,
     mailingAddress:  getVal('Mailing Address:'),
-    dateScraped: new Date().toLocaleDateString('en-US'),
+    phyState,
+    phyCity,
+    addDate:       '',
     mcs150Date:    getVal('MCS-150 Form Date:'),
-    mcs150Mileage: getVal('MCS-150 Mileage (Year):'),    // ✅ now gets "(2023)" part too
+    mcs150Mileage,
+    mcs150MileageYear,
     operationClassification: findMarkedLabels(doc, 'Operation Classification'),
     carrierOperation:        findMarkedLabels(doc, 'Carrier Operation'),
     cargoCarried:            findMarkedLabels(doc, 'Cargo Carried'),
-    outOfServiceDate: getVal('Out of Service Date:'),
-    stateCarrierId:   getVal('State Carrier ID Number:'),
     dunsNumber:       getVal('DUNS Number:'),
+    companyRep:       '',
+    hmInd:            '',
+    insuranceHistoryFilings: [],
     safetyRating:     safety?.rating     || 'NOT RATED',
     safetyRatingDate: safety?.ratingDate || '',
     basicScores:      safety?.basicScores || [],
@@ -416,12 +439,13 @@ export const scrapeRealCarrier = async (
 // ============================================================
 export const downloadCSV = (data: CarrierData[]) => {
   const headers = [
-    'Date', 'MC', 'Email', 'Entity Type', 'Operating Authority Status', 'Out of Service Date',
-    'Legal_Name', 'DBA Name', 'Physical Address', 'Phone', 'Mailing Address', 'USDOT Number',
-    'State Carrier ID Number', 'Power Units', 'Drivers', 'DUNS Number',
-    'MCS-150 Form Date', 'MCS-150 Mileage (Year)', 'Operation Classification',
+    'MC Number', 'USDOT Number', 'Legal Name', 'DBA Name', 'Status', 'Status Code',
+    'Email', 'Phone', 'Physical Address', 'State', 'City', 'Mailing Address',
+    'Power Units', 'Drivers', 'Total CDL', 'Trucks', 'DUNS Number',
+    'Company Rep', 'Hazmat', 'Add Date', 'MCS-150 Form Date',
+    'MCS-150 Mileage', 'Mileage Year', 'Operation Classification',
     'Carrier Operation', 'Cargo Carried', 'Safety Rating', 'Rating Date',
-    'BASIC Scores', 'OOS Rates', 'Inspections'
+    'BASIC Scores', 'OOS Rates', 'Insurance Filings'
   ];
 
   const esc = (val: string | number | undefined) => {
@@ -430,19 +454,19 @@ export const downloadCSV = (data: CarrierData[]) => {
   };
 
   const csvRows = data.map(row => [
-    esc(row.dateScraped), row.mcNumber, esc(row.email),
-    esc(row.entityType), esc(row.status), esc(row.outOfServiceDate),
-    esc(row.legalName), esc(row.dbaName), esc(row.physicalAddress),
-    esc(row.phone), esc(row.mailingAddress), esc(row.dotNumber),
-    esc(row.stateCarrierId), esc(row.powerUnits), esc(row.drivers),
-    esc(row.dunsNumber), esc(row.mcs150Date), esc(row.mcs150Mileage),
+    esc(row.mcNumber), esc(row.dotNumber), esc(row.legalName), esc(row.dbaName),
+    esc(row.status), esc(row.statusCode), esc(row.email), esc(row.phone),
+    esc(row.physicalAddress), esc(row.phyState), esc(row.phyCity), esc(row.mailingAddress),
+    esc(row.powerUnits), esc(row.drivers), esc(row.totalCdl), esc(row.truckUnits),
+    esc(row.dunsNumber), esc(row.companyRep), esc(row.hmInd), esc(row.addDate),
+    esc(row.mcs150Date), esc(row.mcs150Mileage), esc(row.mcs150MileageYear),
     esc(row.operationClassification.join(', ')),
     esc(row.carrierOperation.join(', ')),
     esc(row.cargoCarried.join(', ')),
     esc(row.safetyRating), esc(row.safetyRatingDate),
     esc(row.basicScores?.map((s: BasicScore) => `${s.category}: ${s.measure}`).join(' | ')),
     esc(row.oosRates?.map((r: OosRate) => `${r.type}: ${r.rate} (Avg: ${r.nationalAvg})`).join(' | ')),
-    esc(row.inspections?.map((i: any) => `Report ${i.reportNumber}: ${i.oosViolations} OOS, ${i.driverViolations} Driver, ${i.vehicleViolations} Vehicle, ${i.hazmatViolations} Hazmat`).join(' | '))
+    esc(row.insuranceHistoryFilings?.map(f => `${f.type} - ${f.carrier}: $${f.coverageAmount} (${f.effectiveDate})`).join(' | '))
   ]);
 
   const csv = [headers.join(','), ...csvRows.map(r => r.join(','))].join('\n');
@@ -476,23 +500,29 @@ export const generateMockCarrier = (mc: string, b: boolean): CarrierData => {
     dotNumber: (parseInt(mc) + 1000000).toString(),
     legalName: companyName,
     dbaName: '',
-    entityType: b ? 'BROKER' : 'CARRIER',
-    status: 'AUTHORIZED FOR Property',
+    status: 'AUTHORIZED FOR HIRE',
+    statusCode: 'A',
     email: `contact@${companyName.toLowerCase().replace(/\s/g, '')}.com`,
     phone: `(${randomInt(200, 900)}) ${randomInt(100, 999)}-${randomInt(1000, 9999)}`,
     powerUnits: randomInt(1, 50).toString(),
     drivers: randomInt(1, 60).toString(),
+    totalCdl: randomInt(1, 40).toString(),
+    truckUnits: randomInt(1, 30).toString(),
     physicalAddress: `${randomInt(100, 9999)} Main St, ${city}, ${state} ${randomInt(10000, 99999)}`,
     mailingAddress: '',
-    dateScraped: new Date().toLocaleDateString(),
+    phyState: state,
+    phyCity: city,
+    addDate: '20180315',
     mcs150Date: '01/01/2023',
-    mcs150Mileage: `${randomInt(50, 500)},000 (2023)`,
-    operationClassification: ['Auth. For Hire'],
+    mcs150Mileage: `${randomInt(50, 500)}000`,
+    mcs150MileageYear: '2023',
+    operationClassification: ['AUTHORIZED FOR HIRE'],
     carrierOperation: ['Interstate'],
     cargoCarried: ['General Freight'],
-    outOfServiceDate: '',
-    stateCarrierId: '',
     dunsNumber: '',
+    companyRep: '',
+    hmInd: 'N',
+    insuranceHistoryFilings: [],
     safetyRating: 'SATISFACTORY',
     safetyRatingDate: '05/12/2022',
     basicScores: [

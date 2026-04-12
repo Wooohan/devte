@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Search, Eye, X, MapPin, Phone, Mail, Hash, Truck, Calendar, ShieldCheck, Download, ShieldAlert, Activity, Info, Globe, Map as MapIcon, Boxes, Shield, ExternalLink, CheckCircle2, AlertTriangle, Zap, Loader2, ChevronDown, ChevronUp, Copy, Check } from 'lucide-react';
-import { CarrierData } from '../types';
+import { Search, Eye, X, MapPin, Phone, Mail, Hash, Truck, Calendar, ShieldCheck, Download, ShieldAlert, Activity, Info, Shield, Zap, Loader2, ChevronDown, ChevronUp, Copy, Check, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { CarrierData, InsuranceHistoryFiling } from '../types';
 import { downloadCSV } from '../services/mockService';
 import { CarrierFilters } from '../services/supabaseClient';
 
@@ -44,15 +44,25 @@ const CARGO_TYPES = [
 
 const INSURANCE_REQUIRED_TYPES = ['BI&PD','CARGO','BOND'];
 
-const calculateYearsInBusiness = (mcs150Date: string | undefined): number | null => {
-  if (!mcs150Date || mcs150Date === 'N/A') return null;
+const INSURANCE_COMPANIES = [
+  'GREAT WEST CASUALTY','NATIONAL INDEMNITY','CANAL INSURANCE',
+  'PROGRESSIVE','ZURICH','LIBERTY MUTUAL','TRAVELERS',
+  'OLD REPUBLIC','NORTHLAND INSURANCE','SENTRY INSURANCE',
+  'ACUITY'
+];
+
+const calculateYearsInBusiness = (addDate: string | undefined): number | null => {
+  if (!addDate || addDate.length < 8) return null;
   try {
-    const date = new Date(mcs150Date);
+    const year = parseInt(addDate.substring(0, 4));
+    const month = parseInt(addDate.substring(4, 6));
+    const day = parseInt(addDate.substring(6, 8));
+    const date = new Date(year, month - 1, day);
     if (isNaN(date.getTime())) return null;
     const diffMs = Date.now() - date.getTime();
     const ageDate = new Date(diffMs);
     return Math.abs(ageDate.getUTCFullYear() - 1970);
-  } catch (e) {
+  } catch {
     return null;
   }
 };
@@ -147,17 +157,14 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
   const [showFilters, setShowFilters] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'inspections' | 'crashes'>('inspections');
-  const [expandedInspection, setExpandedInspection] = useState<string | null>(null);
-
   const [filters, setFilters] = useState({
     active: '',
     state: [] as string[],
     dot: '',
+    dunsNumber: '',
     yearsInBusinessMin: '',
     yearsInBusinessMax: '',
     hasEmail: '',
-    hasBoc3: '',
     hasCompanyRep: '',
     classification: [] as string[],
     carrierOperation: [] as string[],
@@ -168,17 +175,12 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     driversMax: '',
     cargo: [] as string[],
     insuranceRequired: [] as string[],
+    insuranceCompany: [] as string[],
     bipdMin: '',
     bipdMax: '',
     bipdOnFile: '',
     cargoOnFile: '',
     bondOnFile: '',
-    oosMin: '', oosMax: '',
-    crashesMin: '', crashesMax: '',
-    injuriesMin: '', injuriesMax: '',
-    fatalitiesMin: '', fatalitiesMax: '',
-    towawayMin: '', towawayMax: '',
-    inspectionsMin: '', inspectionsMax: '',
   });
 
   const handleCopy = (text: string, field: string) => {
@@ -197,13 +199,12 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     if (mcSearchTerm.trim()) f.mcNumber = mcSearchTerm.trim();
     if (nameSearchTerm.trim()) f.legalName = nameSearchTerm.trim();
     if (filters.dot.trim()) f.dotNumber = filters.dot.trim();
+    if (filters.dunsNumber.trim()) f.dunsNumber = filters.dunsNumber.trim();
     if (filters.active) f.active = filters.active;
-    if (filters.state.length > 0) f.state = filters.state.join('|'); 
+    if (filters.state.length > 0) f.state = filters.state.join('|');
     if (filters.hasEmail) f.hasEmail = filters.hasEmail;
-    if (filters.hasBoc3) f.hasBoc3 = filters.hasBoc3;
     if (filters.hasCompanyRep) f.hasCompanyRep = filters.hasCompanyRep;
-    
-    // Improved Numeric Parsing to fix Safety Filters not working
+
     if (filters.yearsInBusinessMin !== '') f.yearsInBusinessMin = parseInt(filters.yearsInBusinessMin);
     if (filters.yearsInBusinessMax !== '') f.yearsInBusinessMax = parseInt(filters.yearsInBusinessMax);
     if (filters.powerUnitsMin !== '') f.powerUnitsMin = parseInt(filters.powerUnitsMin);
@@ -212,30 +213,17 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     if (filters.driversMax !== '') f.driversMax = parseInt(filters.driversMax);
     if (filters.bipdMin !== '') f.bipdMin = parseInt(filters.bipdMin);
     if (filters.bipdMax !== '') f.bipdMax = parseInt(filters.bipdMax);
-    
-    // Safety & Compliance Filters Logic Fix
-    if (filters.oosMin !== '') f.oosMin = parseInt(filters.oosMin);
-    if (filters.oosMax !== '') f.oosMax = parseInt(filters.oosMax);
-    if (filters.crashesMin !== '') f.crashesMin = parseInt(filters.crashesMin);
-    if (filters.crashesMax !== '') f.crashesMax = parseInt(filters.crashesMax);
-    if (filters.injuriesMin !== '') f.injuriesMin = parseInt(filters.injuriesMin);
-    if (filters.injuriesMax !== '') f.injuriesMax = parseInt(filters.injuriesMax);
-    if (filters.fatalitiesMin !== '') f.fatalitiesMin = parseInt(filters.fatalitiesMin);
-    if (filters.fatalitiesMax !== '') f.fatalitiesMax = parseInt(filters.fatalitiesMax);
-    if (filters.towawayMin !== '') f.towawayMin = parseInt(filters.towawayMin);
-    if (filters.towawayMax !== '') f.towawayMax = parseInt(filters.towawayMax);
-    if (filters.inspectionsMin !== '') f.inspectionsMin = parseInt(filters.inspectionsMin);
-    if (filters.inspectionsMax !== '') f.inspectionsMax = parseInt(filters.inspectionsMax);
 
     if (filters.classification.length > 0) f.classification = filters.classification;
     if (filters.carrierOperation.length > 0) f.carrierOperation = filters.carrierOperation;
     if (filters.hazmat) f.hazmat = filters.hazmat;
     if (filters.cargo.length > 0) f.cargo = filters.cargo;
     if (filters.insuranceRequired.length > 0) f.insuranceRequired = filters.insuranceRequired;
+    if (filters.insuranceCompany.length > 0) f.insuranceCompany = filters.insuranceCompany;
     if (filters.bipdOnFile) f.bipdOnFile = filters.bipdOnFile;
     if (filters.cargoOnFile) f.cargoOnFile = filters.cargoOnFile;
     if (filters.bondOnFile) f.bondOnFile = filters.bondOnFile;
-    
+
     return f;
   };
 
@@ -247,14 +235,13 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     setMcSearchTerm('');
     setNameSearchTerm('');
     setFilters({
-      active: '', state: [], dot: '', yearsInBusinessMin: '', yearsInBusinessMax: '',
-      hasEmail: '', hasBoc3: '', hasCompanyRep: '',
+      active: '', state: [], dot: '', dunsNumber: '',
+      yearsInBusinessMin: '', yearsInBusinessMax: '',
+      hasEmail: '', hasCompanyRep: '',
       classification: [], carrierOperation: [], hazmat: '',
       powerUnitsMin: '', powerUnitsMax: '', driversMin: '', driversMax: '', cargo: [],
-      insuranceRequired: [], bipdMin: '', bipdMax: '', bipdOnFile: '', cargoOnFile: '', bondOnFile: '',
-      oosMin: '', oosMax: '', crashesMin: '', crashesMax: '',
-      injuriesMin: '', injuriesMax: '', fatalitiesMin: '', fatalitiesMax: '',
-      towawayMin: '', towawayMax: '', inspectionsMin: '', inspectionsMax: '',
+      insuranceRequired: [], insuranceCompany: [],
+      bipdMin: '', bipdMax: '', bipdOnFile: '', cargoOnFile: '', bondOnFile: '',
     });
     onSearch({});
   };
@@ -272,6 +259,11 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     { value: '1', label: 'Yes' },
     { value: '0', label: 'No' },
   ];
+
+  // Separate active/cancelled insurance
+  const activeInsurance = selectedCarrier?.insuranceHistoryFilings?.filter(
+    (f: InsuranceHistoryFiling) => f.status === 'Active'
+  ) || [];
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col overflow-hidden relative selection:bg-indigo-500/30">
@@ -352,7 +344,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
 
       {showFilters && (
         <div className="mb-4 p-4 bg-slate-950/80 border border-slate-700/50 rounded-3xl overflow-y-auto max-h-[55vh] custom-scrollbar">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             <FilterGroup title="Motor Carrier" icon={<Truck size={12} />}>
               <div>
                 <FilterLabel>Active</FilterLabel>
@@ -364,7 +356,12 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
               </div>
               <div>
                 <FilterLabel>DOT Number</FilterLabel>
-                <input type="number" name="dot" value={filters.dot} onChange={handleFilterChange} placeholder="" min={0}
+                <input type="text" name="dot" value={filters.dot} onChange={handleFilterChange} placeholder=""
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-indigo-500" />
+              </div>
+              <div>
+                <FilterLabel>DUNS Number</FilterLabel>
+                <input type="text" name="dunsNumber" value={filters.dunsNumber} onChange={handleFilterChange} placeholder=""
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-indigo-500" />
               </div>
               <div>
@@ -375,10 +372,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
               <div>
                 <FilterLabel>Has Email</FilterLabel>
                 <FilterSelect name="hasEmail" value={filters.hasEmail} onChange={handleFilterChange} options={yesNoOptions} />
-              </div>
-              <div>
-                <FilterLabel>Has BOC-3</FilterLabel>
-                <FilterSelect name="hasBoc3" value={filters.hasBoc3} onChange={handleFilterChange} options={yesNoOptions} />
               </div>
               <div>
                 <FilterLabel>Company Rep. Available</FilterLabel>
@@ -392,11 +385,11 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                 <MultiSelect options={OPERATION_CLASSIFICATIONS} selected={filters.classification} onChange={v => setFilters(p => ({ ...p, classification: v }))} placeholder="All" />
               </div>
               <div>
-                <FilterLabel>Carrier Operation</FilterLabel>
+                <FilterLabel>Operating Territory</FilterLabel>
                 <MultiSelect options={CARRIER_OPERATIONS} selected={filters.carrierOperation} onChange={v => setFilters(p => ({ ...p, carrierOperation: v }))} placeholder="All" />
               </div>
               <div>
-                <FilterLabel>Hazmat</FilterLabel>
+                <FilterLabel>Hazmat Indicator</FilterLabel>
                 <FilterSelect name="hazmat" value={filters.hazmat} onChange={handleFilterChange} options={yesNoOptions} />
               </div>
               <div>
@@ -417,11 +410,15 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
 
             <FilterGroup title="Insurance Policy" icon={<Shield size={12} />}>
               <div>
-                <FilterLabel>Required</FilterLabel>
+                <FilterLabel>Required Type</FilterLabel>
                 <MultiSelect options={INSURANCE_REQUIRED_TYPES} selected={filters.insuranceRequired} onChange={v => setFilters(p => ({ ...p, insuranceRequired: v }))} placeholder="All" />
               </div>
               <div>
-                <FilterLabel>Required BIPD</FilterLabel>
+                <FilterLabel>Insurance Company</FilterLabel>
+                <MultiSelect options={INSURANCE_COMPANIES} selected={filters.insuranceCompany} onChange={v => setFilters(p => ({ ...p, insuranceCompany: v }))} placeholder="All" />
+              </div>
+              <div>
+                <FilterLabel>Required BIPD ($K)</FilterLabel>
                 <MinMaxInputs nameMin="bipdMin" nameMax="bipdMax"
                   valueMin={filters.bipdMin} valueMax={filters.bipdMax} onChange={handleFilterChange} />
               </div>
@@ -434,35 +431,8 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                 <FilterSelect name="cargoOnFile" value={filters.cargoOnFile} onChange={handleFilterChange} options={yesNoNumOptions} />
               </div>
               <div>
-                <FilterLabel>Has Bond Insurance</FilterLabel>
+                <FilterLabel>Has Bond/Surety</FilterLabel>
                 <FilterSelect name="bondOnFile" value={filters.bondOnFile} onChange={handleFilterChange} options={yesNoNumOptions} />
-              </div>
-            </FilterGroup>
-
-            <FilterGroup title="Safety" icon={<ShieldCheck size={12} />}>
-              <div>
-                <FilterLabel>OOS Violations</FilterLabel>
-                <MinMaxInputs nameMin="oosMin" nameMax="oosMax" valueMin={filters.oosMin} valueMax={filters.oosMax} onChange={handleFilterChange} />
-              </div>
-              <div>
-                <FilterLabel>Crashes</FilterLabel>
-                <MinMaxInputs nameMin="crashesMin" nameMax="crashesMax" valueMin={filters.crashesMin} valueMax={filters.crashesMax} onChange={handleFilterChange} />
-              </div>
-              <div>
-                <FilterLabel>Injuries</FilterLabel>
-                <MinMaxInputs nameMin="injuriesMin" nameMax="injuriesMax" valueMin={filters.injuriesMin} valueMax={filters.injuriesMax} onChange={handleFilterChange} />
-              </div>
-              <div>
-                <FilterLabel>Fatalities</FilterLabel>
-                <MinMaxInputs nameMin="fatalitiesMin" nameMax="fatalitiesMax" valueMin={filters.fatalitiesMin} valueMax={filters.fatalitiesMax} onChange={handleFilterChange} />
-              </div>
-              <div>
-                <FilterLabel>Towaway</FilterLabel>
-                <MinMaxInputs nameMin="towawayMin" nameMax="towawayMax" valueMin={filters.towawayMin} valueMax={filters.towawayMax} onChange={handleFilterChange} />
-              </div>
-              <div>
-                <FilterLabel>Inspections</FilterLabel>
-                <MinMaxInputs nameMin="inspectionsMin" nameMax="inspectionsMax" valueMin={filters.inspectionsMin} valueMax={filters.inspectionsMax} onChange={handleFilterChange} />
               </div>
             </FilterGroup>
           </div>
@@ -479,6 +449,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         </div>
       )}
 
+      {/* ── Results Table ────────────────────────────────────────────────────── */}
       <div className="flex-1 bg-slate-900/40 border border-slate-700/50 rounded-3xl overflow-hidden flex flex-col shadow-inner min-h-0">
         <div className="overflow-auto custom-scrollbar flex-1">
           <table className="w-full text-left text-sm text-slate-300">
@@ -488,25 +459,31 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                 <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">Legal Name</th>
                 <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">DOT Number</th>
                 <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">Status</th>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">State</th>
                 <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500 text-right">View</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
               {!isLoading && carriers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-16 text-center text-slate-600 italic">No results found matching your search criteria.</td>
+                  <td colSpan={6} className="p-16 text-center text-slate-600 italic">No results found matching your search criteria.</td>
                 </tr>
               ) : (
                 carriers.map((carrier, idx) => (
                   <tr key={idx} className="hover:bg-indigo-500/5 transition-colors group cursor-pointer" onClick={() => setSelectedDot(carrier.dotNumber)}>
-                    <td className="p-4 font-mono text-indigo-400 font-bold">{carrier.mcNumber}</td>
+                    <td className="p-4 font-mono text-indigo-400 font-bold">{carrier.mcNumber || '--'}</td>
                     <td className="p-4">
                       <div className="font-bold text-white group-hover:text-indigo-200 transition-colors truncate max-w-[250px]">{carrier.legalName}</div>
                     </td>
                     <td className="p-4 font-mono text-slate-400">{carrier.dotNumber}</td>
                     <td className="p-4">
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-black tracking-tight border ${carrier.status?.includes('AUTHORIZED') && !carrier.status?.includes('NOT') ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
-                        {carrier.status?.includes('AUTHORIZED') && !carrier.status?.includes('NOT') ? 'ACTIVE' : 'INACTIVE'}
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-black tracking-tight border ${carrier.statusCode === 'A' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                        {carrier.statusCode === 'A' ? 'ACTIVE' : 'INACTIVE'}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-black tracking-tight border bg-slate-500/10 text-slate-400 border-slate-500/20">
+                        {carrier.phyState || '--'}
                       </span>
                     </td>
                     <td className="p-4 text-right">
@@ -525,11 +502,12 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         </div>
       </div>
 
+      {/* ── Detail Modal ─────────────────────────────────────────────────────── */}
       {selectedCarrier && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm animate-in fade-in duration-300">
           <div className="bg-slate-900 border-2 border-slate-700/50 w-full max-w-7xl max-h-[95vh] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col relative animate-in zoom-in slide-in-from-bottom-4 duration-300">
 
-            {/* HEADER: Height reduced and Badges updated to Emerald Green */}
+            {/* HEADER */}
             <div className="p-4 md:p-5 border-b border-slate-800 bg-slate-850/30 flex justify-between items-start">
               <div className="flex gap-4 md:gap-6 items-center">
                 <div className="w-12 h-12 md:w-14 md:h-14 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-500/10">
@@ -538,14 +516,14 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-3 mb-1">
                     <h2 className="text-lg md:text-2xl font-black text-white uppercase tracking-tighter truncate max-w-[300px] md:max-w-[700px] leading-tight">{selectedCarrier.legalName}</h2>
-                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest border-2 ${selectedCarrier.status?.includes('NOT AUTHORIZED') ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-green-500/10 text-green-400 border-green-500/30'}`}>
-                      {selectedCarrier.status?.includes('NOT AUTHORIZED') ? 'Unauthorized' : 'Active Authority'}
+                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest border-2 ${selectedCarrier.statusCode !== 'A' ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-green-500/10 text-green-400 border-green-500/30'}`}>
+                      {selectedCarrier.statusCode !== 'A' ? 'Unauthorized' : 'Active Authority'}
                     </span>
                   </div>
-                  
+
                   {/* EMERALD BADGE ROW */}
                   <div className="flex items-center gap-2 mt-2">
-                    <button 
+                    <button
                       onClick={() => handleCopy(selectedCarrier.dotNumber, 'dot')}
                       className="bg-[#10B981] hover:bg-[#059669] text-white rounded-lg px-3 py-1.5 flex items-center gap-2 transition-all active:scale-95 shadow-md"
                     >
@@ -555,21 +533,25 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                       {copiedField === 'dot' ? <Check size={12} className="text-white" /> : <Copy size={12} className="text-white/60" />}
                     </button>
 
-                    <button 
-                      onClick={() => handleCopy(selectedCarrier.mcNumber || '', 'mc')}
-                      className="bg-[#10B981] hover:bg-[#059669] text-white rounded-lg px-3 py-1.5 flex items-center gap-2 transition-all active:scale-95 shadow-md"
-                    >
-                      <span className="font-black text-[10px] md:text-xs tracking-wide uppercase">
-                        MC {selectedCarrier.mcNumber}
-                      </span>
-                      {copiedField === 'mc' ? <Check size={12} className="text-white" /> : <Copy size={12} className="text-white/60" />}
-                    </button>
+                    {selectedCarrier.mcNumber && (
+                      <button
+                        onClick={() => handleCopy(selectedCarrier.mcNumber || '', 'mc')}
+                        className="bg-[#10B981] hover:bg-[#059669] text-white rounded-lg px-3 py-1.5 flex items-center gap-2 transition-all active:scale-95 shadow-md"
+                      >
+                        <span className="font-black text-[10px] md:text-xs tracking-wide uppercase">
+                          MC {selectedCarrier.mcNumber}
+                        </span>
+                        {copiedField === 'mc' ? <Check size={12} className="text-white" /> : <Copy size={12} className="text-white/60" />}
+                      </button>
+                    )}
 
-                    <div className="bg-[#10B981] text-white rounded-lg px-3 py-1.5 shadow-md">
-                      <span className="font-black text-[10px] md:text-xs uppercase tracking-wide">
-                        {selectedCarrier.operationClassification?.some(c => c.toLowerCase().includes('broker')) ? 'Broker' : 'Carrier'}
-                      </span>
-                    </div>
+                    {selectedCarrier.phyState && (
+                      <div className="bg-slate-600 text-white rounded-lg px-3 py-1.5 shadow-md">
+                        <span className="font-black text-[10px] md:text-xs uppercase tracking-wide">
+                          {selectedCarrier.phyState}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -580,15 +562,17 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
 
             <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar bg-slate-900/40">
 
+              {/* ── Top Cards: Identification, Contact, Compliance ─────────── */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <div className="bg-slate-850/60 p-6 rounded-3xl border border-slate-700/50 space-y-4 shadow-lg group">
                   <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1 group-hover:text-indigo-400 transition-colors">
                     <Hash size={14} className="text-indigo-400" /> Identification
                   </h3>
                   <div className="space-y-3">
-                    <div className="flex flex-col"><span className="text-[9px] text-slate-500 font-black uppercase">MC/MX Number</span><span className="text-base font-black text-indigo-400 font-mono tracking-tight">{selectedCarrier.mcNumber}</span></div>
+                    <div className="flex flex-col"><span className="text-[9px] text-slate-500 font-black uppercase">MC/MX Number</span><span className="text-base font-black text-indigo-400 font-mono tracking-tight">{selectedCarrier.mcNumber || '--'}</span></div>
                     <div className="flex flex-col"><span className="text-[9px] text-slate-500 font-black uppercase">USDOT Number</span><span className="text-base font-black text-white font-mono tracking-tight">{selectedCarrier.dotNumber}</span></div>
                     <div className="flex flex-col"><span className="text-[9px] text-slate-500 font-black uppercase">DUNS Number</span><span className="text-sm font-bold text-slate-400">{selectedCarrier.dunsNumber || '--'}</span></div>
+                    <div className="flex flex-col"><span className="text-[9px] text-slate-500 font-black uppercase">Company Rep</span><span className="text-sm font-bold text-slate-400">{selectedCarrier.companyRep || '--'}</span></div>
                   </div>
                 </div>
 
@@ -610,7 +594,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                     </div>
                     <div className="flex items-center gap-3">
                       <MapPin size={16} className="text-indigo-400 shrink-0" />
-                      <div className="flex flex-col"><span className="text-[9px] text-slate-500 font-black uppercase">Location</span><span className="text-xs font-bold text-slate-300 leading-tight">{selectedCarrier.physicalAddress}</span></div>
+                      <div className="flex flex-col"><span className="text-[9px] text-slate-500 font-black uppercase">Location</span><span className="text-xs font-bold text-slate-300 leading-tight">{selectedCarrier.physicalAddress || 'N/A'}</span></div>
                     </div>
                   </div>
                 </div>
@@ -623,9 +607,9 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                     <div className="bg-slate-900/50 p-3 rounded-2xl border border-slate-800 shadow-inner">
                       <div className="flex justify-between items-start mb-1">
                         <span className="text-[9px] text-slate-500 font-black uppercase">MCS-150 Form Date</span>
-                        {calculateYearsInBusiness(selectedCarrier.mcs150Date) !== null && (
+                        {calculateYearsInBusiness(selectedCarrier.addDate) !== null && (
                           <span className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter">
-                            {calculateYearsInBusiness(selectedCarrier.mcs150Date)} Years in Business
+                            {calculateYearsInBusiness(selectedCarrier.addDate)} Years in Business
                           </span>
                         )}
                       </div>
@@ -633,12 +617,16 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                     </div>
                     <div className="bg-slate-900/50 p-3 rounded-2xl border border-slate-800 shadow-inner">
                       <span className="text-[9px] text-slate-500 font-black uppercase block mb-1">Mileage / VMT</span>
-                      <span className="text-sm font-bold text-slate-300">{selectedCarrier.mcs150Mileage || 'N/A'}</span>
+                      <span className="text-sm font-bold text-slate-300">
+                        {selectedCarrier.mcs150Mileage ? `${Number(selectedCarrier.mcs150Mileage).toLocaleString()} mi` : 'N/A'}
+                        {selectedCarrier.mcs150MileageYear ? ` (${selectedCarrier.mcs150MileageYear})` : ''}
+                      </span>
                     </div>
                   </div>
                 </div>
               </div>
 
+              {/* ── Operation Info + Insurance Filings ────────────────────────── */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col gap-6 shadow-2xl">
                   <div className="flex items-center gap-3">
@@ -649,7 +637,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                     <div>
                       <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Classifications</h5>
                       <p className="text-sm font-bold text-slate-200 bg-slate-900/50 p-3 rounded-xl border border-slate-800">
-                        {selectedCarrier.operationClassification?.join(', ') || 'N/A'}
+                        {selectedCarrier.operationClassification?.join('; ') || 'N/A'}
                       </p>
                     </div>
                     <div>
@@ -658,26 +646,31 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                         {selectedCarrier.carrierOperation?.map((op, idx) => (
                           <span key={idx} className="bg-indigo-500/10 text-indigo-300 px-3 py-1 rounded-lg border border-indigo-500/20 font-bold text-[10px] uppercase">{op}</span>
                         ))}
+                        {(!selectedCarrier.carrierOperation || selectedCarrier.carrierOperation.length === 0) && (
+                          <span className="text-slate-500 text-sm">N/A</span>
+                        )}
                       </div>
                     </div>
                     <div>
                       <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Cargo Carried</h5>
                       <div className="grid grid-cols-1 gap-2">
-                        {selectedCarrier.cargoCarried?.map((cargo, idx) => (
+                        {selectedCarrier.cargoCarried?.length > 0 ? selectedCarrier.cargoCarried.map((cargo, idx) => (
                           <div key={idx} className="bg-slate-900/50 border border-slate-800 p-3 rounded-xl flex items-center gap-3">
                             <Truck size={14} className="text-slate-600" />
                             <span className="text-xs font-bold text-slate-300">{cargo}</span>
                           </div>
-                        ))}
+                        )) : (
+                          <span className="text-slate-500 text-sm">N/A</span>
+                        )}
                       </div>
                     </div>
-                    <div className={`w-full py-4 rounded-2xl flex items-center justify-center font-black tracking-widest text-xs border-2 ${selectedCarrier.cargoCarried?.some(c => c.toLowerCase().includes('haz')) ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
-                      {selectedCarrier.cargoCarried?.some(c => c.toLowerCase().includes('haz')) ? 'HAZMAT INDICATOR: YES' : 'HAZMAT INDICATOR: NON-HAZMAT'}
+                    <div className={`w-full py-4 rounded-2xl flex items-center justify-center font-black tracking-widest text-xs border-2 ${selectedCarrier.hmInd === 'Y' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
+                      {selectedCarrier.hmInd === 'Y' ? 'HAZMAT INDICATOR: YES' : 'HAZMAT INDICATOR: NON-HAZMAT'}
                     </div>
                     <div className="h-px bg-slate-800/50 my-2" />
                     <div>
                       <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Fleet Information</h5>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-3 gap-3">
                         <div className="bg-slate-900/50 border border-slate-800 p-3 rounded-xl flex flex-col items-center">
                           <span className="text-[9px] text-slate-500 font-black uppercase mb-1">Power Units</span>
                           <span className="text-lg font-black text-white">{selectedCarrier.powerUnits || '0'}</span>
@@ -686,22 +679,28 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                           <span className="text-[9px] text-slate-500 font-black uppercase mb-1">Drivers</span>
                           <span className="text-lg font-black text-white">{selectedCarrier.drivers || '0'}</span>
                         </div>
+                        <div className="bg-slate-900/50 border border-slate-800 p-3 rounded-xl flex flex-col items-center">
+                          <span className="text-[9px] text-slate-500 font-black uppercase mb-1">Trucks</span>
+                          <span className="text-lg font-black text-white">{selectedCarrier.truckUnits || '0'}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
+                {/* Insurance Filings */}
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl">
                   <div className="flex items-center gap-3 mb-8">
                     <ShieldCheck size={20} className="text-emerald-400" />
-                    <h4 className="text-xl font-black text-white uppercase tracking-tight">Verified L&I Filings</h4>
+                    <h4 className="text-xl font-black text-white uppercase tracking-tight">Insurance Filings</h4>
+                    <span className="text-[10px] font-bold text-slate-500 ml-auto">{activeInsurance.length} Active</span>
                   </div>
                   <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
-                    {selectedCarrier.insurancePolicies && selectedCarrier.insurancePolicies.length > 0 ? (
-                      selectedCarrier.insurancePolicies.map((p: any, i: number) => (
+                    {activeInsurance.length > 0 ? (
+                      activeInsurance.map((p: InsuranceHistoryFiling, i: number) => (
                         <div key={i} className="bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 shadow-sm group/policy hover:border-indigo-500/30 transition-all">
                           <div className="flex justify-between items-start mb-4">
-                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest border border-indigo-500/10 px-2 py-0.5 rounded-lg">{p.type} FILING</span>
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest border border-indigo-500/10 px-2 py-0.5 rounded-lg">{p.type}</span>
                             <span className="text-xl font-black text-white">{p.coverageAmount}</span>
                           </div>
                           <p className="text-sm font-black text-slate-200 mb-4 truncate leading-tight group-hover/policy:text-indigo-300 transition-colors uppercase">{p.carrier}</p>
@@ -714,215 +713,72 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                     ) : (
                       <div className="flex flex-col items-center justify-center py-20 text-slate-700 text-center">
                         <Info size={48} className="opacity-10 mb-4" />
-                        <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">No Filings Extracted</p>
-                        <p className="text-[10px] text-slate-600 max-w-[180px] leading-relaxed italic">Intelligence enrichment required for insurance verification.</p>
+                        <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">No Active Insurance Filings</p>
+                        <p className="text-[10px] text-slate-600 max-w-[180px] leading-relaxed italic">Census data shows no active insurance policies on file.</p>
                       </div>
                     )}
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col gap-6 shadow-2xl relative">
-                  <div className="flex items-center justify-between">
+              {/* ── Safety Rating (only shown if enriched) ────────────────────── */}
+              {selectedCarrier.safetyRating && selectedCarrier.safetyRating !== 'N/A' && selectedCarrier.safetyRating !== 'NOT RATED' && (
+                <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 shadow-2xl mb-8">
+                  <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
                       <ShieldCheck size={20} className="text-indigo-400" />
                       <h4 className="text-xl font-black text-white uppercase tracking-tight">Safety Information</h4>
                     </div>
-                    <a href={`https://ai.fmcsa.dot.gov/SMS/Carrier/${selectedCarrier.dotNumber}/CompleteProfile.aspx`} target="_blank" className="text-[10px] font-bold text-indigo-400 flex items-center gap-1 hover:text-white transition-colors">
+                    <a href={`https://ai.fmcsa.dot.gov/SMS/Carrier/${selectedCarrier.dotNumber}/CompleteProfile.aspx`} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-400 flex items-center gap-1 hover:text-white transition-colors">
                       <ExternalLink size={12} /> View FMCSA Source
                     </a>
                   </div>
-                  {selectedCarrier.safetyRating && selectedCarrier.safetyRating !== 'N/A' ? (
-                    <div className="space-y-8 animate-in fade-in duration-500">
-                      <div className="flex justify-between items-start">
-                        <div className="space-y-4">
-                          <h5 className="text-xs font-bold text-slate-100">Safety Rating</h5>
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-                              <CheckCircle2 size={24} />
-                            </div>
-                            <div>
-                              <p className="text-sm font-black text-slate-200 leading-tight uppercase">{selectedCarrier.safetyRating}</p>
-                              <p className="text-[11px] text-slate-500 font-medium font-mono">ENRICHED: {selectedCarrier.safetyRatingDate}</p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex-1 max-w-[180px] space-y-4">
-                          <div className="space-y-1">
-                            <h5 className="text-xs font-bold text-slate-100">OOS Rates</h5>
-                            <p className="text-[9px] text-slate-500 font-mono tracking-tighter uppercase">Last 24 Months Activity</p>
-                          </div>
-                          {selectedCarrier.oosRates?.map((oos, idx) => (
-                            <div key={idx} className="space-y-1">
-                              <div className="flex justify-between text-[10px] font-black uppercase">
-                                <span className="text-slate-500 truncate mr-2">{oos.type}</span>
-                                <span className="text-emerald-400">{oos.rate}</span>
-                              </div>
-                              <div className="w-full bg-slate-800/50 rounded-full h-1 relative overflow-hidden">
-                                <div className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full" style={{ width: `${parseFloat(oos.rate) || 0}%` }} />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+                  <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                        <CheckCircle2 size={24} />
                       </div>
-                      <div className="h-px bg-slate-800/50" />
-                      <div className="space-y-4">
-                        <h5 className="text-xs font-black text-slate-100 uppercase tracking-widest opacity-80">BASIC Performance</h5>
-                        <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                          {selectedCarrier.basicScores?.map((score, idx) => (
-                            <div key={idx} className="flex justify-between items-center text-xs">
-                              <span className="text-slate-500 truncate max-w-[120px]">{score.category}</span>
-                              <span className="text-slate-300 font-bold font-mono">{score.measure}</span>
-                            </div>
-                          ))}
-                        </div>
+                      <div>
+                        <p className="text-sm font-black text-slate-200 leading-tight uppercase">{selectedCarrier.safetyRating}</p>
+                        {selectedCarrier.safetyRatingDate && (
+                          <p className="text-[11px] text-slate-500 font-medium font-mono">Date: {selectedCarrier.safetyRatingDate}</p>
+                        )}
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center py-20 text-slate-700 text-center space-y-4">
-                      <div className="p-6 bg-slate-800/30 rounded-full"><ShieldAlert size={48} className="opacity-20 text-indigo-500" /></div>
-                      <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Record Not Enriched</p>
-                      <button onClick={() => { setSelectedDot(null); onNavigateToInsurance(); }} className="text-[10px] font-black text-indigo-400 hover:text-white uppercase transition-colors bg-indigo-500/5 px-4 py-2 rounded-lg border border-indigo-500/10">Launch Pipeline now</button>
+                    {selectedCarrier.oosRates && selectedCarrier.oosRates.length > 0 && (
+                      <div className="flex-1 max-w-[300px] space-y-2 ml-8">
+                        <h5 className="text-xs font-bold text-slate-100">OOS Rates</h5>
+                        {selectedCarrier.oosRates.map((oos, idx) => (
+                          <div key={idx} className="space-y-1">
+                            <div className="flex justify-between text-[10px] font-black uppercase">
+                              <span className="text-slate-500 truncate mr-2">{oos.type}</span>
+                              <span className="text-emerald-400">{oos.rate}</span>
+                            </div>
+                            <div className="w-full bg-slate-800/50 rounded-full h-1 relative overflow-hidden">
+                              <div className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full" style={{ width: `${parseFloat(oos.rate) || 0}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {selectedCarrier.basicScores && selectedCarrier.basicScores.length > 0 && (
+                    <div className="mt-6 pt-6 border-t border-slate-800/50">
+                      <h5 className="text-xs font-black text-slate-100 uppercase tracking-widest opacity-80 mb-3">BASIC Performance</h5>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-3">
+                        {selectedCarrier.basicScores.map((score, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-xs">
+                            <span className="text-slate-500 truncate max-w-[120px]">{score.category}</span>
+                            <span className="text-slate-300 font-bold font-mono">{score.measure}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
-
-                <div className="bg-white rounded-[2rem] p-8 flex flex-col shadow-xl text-slate-900">
-                  <div className="flex items-center gap-3 mb-6">
-                    <Activity size={20} className="text-slate-700" />
-                    <h4 className="text-xl font-black uppercase tracking-tight">Inspections & Crashes</h4>
-                  </div>
-
-                  <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
-                    <button 
-                      onClick={() => setActiveTab('inspections')}
-                      className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'inspections' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      Inspections
-                    </button>
-                    <button 
-                      onClick={() => setActiveTab('crashes')}
-                      className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'crashes' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      Crashes
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-4 mb-6">
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Total</span>
-                      <span className="text-xl font-black">{activeTab === 'inspections' ? selectedCarrier.inspections?.length || 0 : selectedCarrier.crashes?.length || 0}</span>
-                    </div>
-                    <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 text-center">
-                      <span className="text-[10px] font-bold text-blue-400 uppercase block mb-1">Violations</span>
-                      <span className="text-xl font-black text-blue-600">
-                        {selectedCarrier.inspections?.reduce((acc, curr) => acc + (curr.violationList?.length || 0), 0) || 0}
-                      </span>
-                    </div>
-                    <div className="bg-red-50 p-4 rounded-2xl border border-red-100 text-center">
-                      <span className="text-[10px] font-bold text-red-400 uppercase block mb-1">OOS</span>
-                      <span className="text-xl font-black text-red-600">
-                        {selectedCarrier.inspections?.reduce((acc, curr) => acc + (curr.oosViolations || 0), 0) || 0}
-                      </span>
-                    </div>
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Crashes</span>
-                      <span className="text-xl font-black">{selectedCarrier.crashes?.length || 0}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
-                    {activeTab === 'inspections' ? (
-                      selectedCarrier.inspections?.map((insp, i) => (
-                        <div key={i} className="border border-slate-100 rounded-2xl overflow-hidden group">
-                          <div 
-                            className="p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50 transition-colors"
-                            onClick={() => setExpandedInspection(expandedInspection === insp.reportNumber ? null : insp.reportNumber)}
-                          >
-                            <div>
-                              <p className="text-sm font-black">{insp.date}</p>
-                              <p className="text-[11px] text-slate-500">{insp.location}</p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {insp.violationList?.length > 0 && (
-                                <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-lg text-[10px] font-black">
-                                  {insp.violationList.length} Violations
-                                </span>
-                              )}
-                              {insp.oosViolations > 0 && (
-                                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-lg text-[10px] font-black">OOS</span>
-                              )}
-                              {expandedInspection === insp.reportNumber ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                            </div>
-                          </div>
-                          
-                          {expandedInspection === insp.reportNumber && (
-                            <div className="px-4 pb-4 pt-4 border-t border-slate-100 bg-[#F8F9FA]">
-                              <div className="grid grid-cols-3 grid-rows-2 gap-y-4 gap-x-6 mb-6">
-                                <div className="flex flex-col gap-1">
-                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">Report #:</span>
-                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.reportNumber}</span>
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">Location:</span>
-                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.location}</span>
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">OOS Violations:</span>
-                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.oosViolations}</span>
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">Driver Violations:</span>
-                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.driverViolations}</span>
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">Vehicle Violations:</span>
-                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.vehicleViolations}</span>
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">Hazmat Violations:</span>
-                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.hazmatViolations}</span>
-                                </div>
-                              </div>
-                              {insp.violationList?.length > 0 && (
-                                <div className="space-y-2 mt-4 pt-4 border-t border-slate-200">
-                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)] uppercase tracking-wider">Violation Details</span>
-                                  {insp.violationList.map((v: any, vi: number) => (
-                                    <div key={vi} className="bg-white p-3 rounded-xl border border-slate-200 text-[11px] relative group/viol shadow-sm">
-                                      <div className="flex justify-between font-bold mb-1">
-                                        <span className="text-blue-600">{v.label}</span>
-                                        <span className="text-slate-400">Weight: {v.weight}</span>
-                                      </div>
-                                      <p className="text-slate-600 leading-relaxed">{v.description}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      selectedCarrier.crashes?.map((crash: any, i: number) => (
-                        <div key={i} className="p-4 border border-slate-100 rounded-2xl flex justify-between items-center">
-                          <div>
-                            <p className="text-sm font-black">{crash.date}</p>
-                            <p className="text-[11px] text-slate-500">{crash.state} | {crash.number}</p>
-                          </div>
-                          <div className="flex gap-2">
-                            {parseInt(crash.fatal) > 0 && <span className="bg-red-600 text-white px-2 py-0.5 rounded-lg text-[10px] font-black">FATAL</span>}
-                            {parseInt(crash.injuries) > 0 && <span className="bg-orange-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black">INJURY</span>}
-                          </div>
-                        </div>
-                      )) || <p className="text-center py-10 text-slate-400 italic">No crash records found</p>
-                    )}
-                  </div>
-                </div>
-              </div>
+              )}
 
             </div>
-
           </div>
         </div>
       )}
