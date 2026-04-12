@@ -46,37 +46,54 @@ export interface Crash {
   injuries: string;
 }
 
+export interface InsuranceHistoryFiling {
+  policyNumber: string;
+  carrier: string;
+  type: string;
+  formCode: string;
+  coverageAmount: string;
+  effectiveDate: string;
+  cancellationDate: string | null;
+  docketNumber: string;
+  status: string;
+}
+
 export interface CarrierData {
   mcNumber: string;
   dotNumber: string;
   legalName: string;
   dbaName: string;
-  entityType: string;
   status: string;
+  statusCode: string;
   email: string;
   phone: string;
   powerUnits: string;
-  nonCmvUnits?: string;
   drivers: string;
+  totalCdl: string;
+  truckUnits: string;
   physicalAddress: string;
   mailingAddress: string;
-  dateScraped: string;
-  // Extended fields
+  phyState: string;
+  phyCity: string;
+  // Census fields
+  addDate: string;
   mcs150Date: string;
   mcs150Mileage: string;
+  mcs150MileageYear: string;
   operationClassification: string[];
   carrierOperation: string[];
   cargoCarried: string[];
-  outOfServiceDate: string;
-  stateCarrierId: string;
   dunsNumber: string;
-  // Safety & Insurance
+  companyRep: string;
+  hmInd: string;
+  // Insurance (embedded Census JSONB)
+  insuranceHistoryFilings: InsuranceHistoryFiling[];
   insurancePolicies?: InsurancePolicy[];
+  // Safety (from scraper enrichment, not Census)
   safetyRating?: string;
   safetyRatingDate?: string;
   basicScores?: BasicScore[];
   oosRates?: OosRate[];
-  // Inspections & Crashes
   inspections?: Inspection[];
   crashes?: Crash[];
 }
